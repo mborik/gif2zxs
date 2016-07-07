@@ -10,6 +10,23 @@ let toWidth = (a, width) => {
 	return ('0000000000' + n).substr(-Math.max(width || 0, n.length));
 };
 
+let bayer4x4ThresholdMap = [
+	[  15, 135,  45, 165 ],
+	[ 195,  75, 225, 105 ],
+	[  60, 180,  30, 150 ],
+	[ 240, 120, 210,  90 ]
+];
+let bayer8x8ThresholdMap = [
+	[  4, 192,  51, 239,  16, 204,  63, 251],
+	[129,  67, 177, 114, 141,  78, 188, 126],
+	[ 35, 224,  20, 208,  47, 235,  31, 220],
+	[161,  98, 145,  82, 173, 110, 157,  94],
+	[ 12, 200,  59, 247,   8, 196,  55, 243],
+	[137,  75, 184, 122, 133,  71, 180, 118],
+	[ 43, 231,  27, 216,  39, 228,  24, 212],
+	[169, 106, 153,  90, 165, 102, 149,  86]
+];
+
 /*
  * ScreenAniStream
  * custom PixelStream prototype to convert gif frames to ZX-Spectrum screen format.
@@ -20,6 +37,7 @@ function ScreenAniStream (opt) {
 	this.buffer = new BufferList;
 
 	this.outputName = (opt.dir || '.') + '/' + (opt.name || 'output');
+	this.ditherMethod = opt.dither || 'threshold';
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
 }
@@ -27,7 +45,8 @@ util.inherits(ScreenAniStream, PixelStream);
 
 //---------------------------------------------------------------------------------------
 ScreenAniStream.prototype._start = function (done) {
-	console.log('[ScreenAniStream] image encoding started...');
+	console.log('[ScreenAniStream] image encoding started (dither:%s, attr:%d)...',
+			this.ditherMethod, this.fillAttr);
 
 	if (this.format.colorSpace !== 'rgb') {
 		console.warn("[ScreenAniStream] colorSpace won't be different from RGB!");
@@ -126,8 +145,7 @@ ScreenAniStream.prototype._endFrame = function (done) {
 	speccy.fill(0);
 	for (let dstY = p.offset.y, srcY = 0; srcY < height; srcY++, dstY++) {
 		for (let dstX = p.offset.x, srcX = 0; srcX < width; srcX++, dstX++) {
-			speccy[dstX + (dstY * 256)] =
-				(render[srcX + (srcY * width)] > this.threshold) ? 1 : 0;
+			speccy[dstX + (dstY * 256)] = this.dither(render, srcX, srcY, width);
 		}
 	}
 
@@ -195,6 +213,45 @@ ScreenAniStream.prototype.resizeBuffer = function (input, p) {
 	}
 
 	return result;
+};
+
+ScreenAniStream.prototype.dither = function (buffer, x, y, w) {
+	let ptr = x + (y * w),
+		value = buffer[ptr], err,
+		thresholded = (value > this.threshold) ? 255 : 0;
+
+	switch (this.ditherMethod) {
+		case 'bayer4':
+			value = (value + bayer4x4ThresholdMap[x % 4][y % 4]) >>> 1;
+			break;
+
+		case 'bayer':
+		case 'bayer8':
+			value = (value + bayer8x8ThresholdMap[x % 8][y % 8]) >>> 1;
+			break;
+
+		case 'floydsteinberg':
+			err = Math.max(0, value - thresholded) >>> 4;
+
+			buffer[ptr + 1]     += err * 7;
+			buffer[ptr + w]     += err * 5;
+			buffer[ptr + w - 1] += err * 3;
+			buffer[ptr + w + 1] += err * 1;
+			break;
+
+		case 'atkinson':
+			err = Math.max(0, value - thresholded) >>> 3;
+
+			buffer[ptr + 1]     += err;
+			buffer[ptr + 2]     += err;
+			buffer[ptr + w]     += err;
+			buffer[ptr + w - 1] += err;
+			buffer[ptr + w + 1] += err;
+			buffer[ptr + w + w] += err;
+			break;
+	}
+
+	return (value > this.threshold) ? 1 : 0;
 };
 
 ScreenAniStream.prototype.downHL = function (hl) {
