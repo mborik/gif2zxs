@@ -2,7 +2,7 @@
   "name": "gif2zxs",
   "version": "1.0.0",
   "description": "convert GIF animations into ZX-Spectrum screens",
-  "main": "gif2zxs.js",
+  "main": "./src/gif2zxs.js",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/mborik/gif2zxs.git"
