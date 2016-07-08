@@ -12,7 +12,7 @@ let cli = meow(`
 
 	Options:
 		-d, --dir            Output directory
-		-t, --threshold      Threshold integer value (0..255, defaults 128)
+		-t, --threshold      Threshold integer value (0..255, default 128)
 		--dither             Dither method:
 		    "none"           Simple threshold, no dither (default)
 		    "bayer4"         Bayer 4x4 matrix ordered dither
