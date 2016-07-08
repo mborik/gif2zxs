@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "convert GIF animations into ZX-Spectrum screens",
   "main": "./src/gif2zxs.js",
+  "bin": {
+    "gif2zxs": "./bin/gif2zxs-cli.js"
+  },
+  "preferGlobal": true,
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/mborik/gif2zxs.git"
@@ -20,11 +24,11 @@
   "bugs": {
     "url": "https://github.com/mborik/gif2zxs/issues"
   },
-  "homepage": "https://github.com/mborik/gif2zxs#readme",
+  "homepage": "https://github.com/mborik/gif2zxs",
   "dependencies": {
     "bl": "^1.1.2",
     "gif-stream": "^1.1.0",
-    "minimist": "^1.2.0",
+    "meow": "^3.7.0",
     "pixel-stream": "^1.0.3"
   }
 }
