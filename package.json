@@ -1,8 +1,8 @@
 {
   "name": "gif2zxs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "convert GIF animations into ZX-Spectrum screens",
-  "main": "./src/gif2zxs.js",
+  "main": "./src/index.js",
   "bin": {
     "gif2zxs": "./bin/gif2zxs-cli.js"
   },

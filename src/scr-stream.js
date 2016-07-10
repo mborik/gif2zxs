@@ -1,36 +1,37 @@
+/**
+ * ScreenAniStream
+ * PixelStream prototype to convert GIF frames to ZX-Spectrum screen format.
+ *
+ * Copyright (c) 2016 Martin Bórik <mborik@users.sourceforge.net>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
 'use strict';
 
-let fs = require('fs');
-let util = require('util');
-let BufferList = require('bl');
-let PixelStream = require('pixel-stream');
-
-let toWidth = (a, width) => {
-	let n = '' + (a.valueOf() >> 0);
-	return ('0000000000' + n).substr(-Math.max(width || 0, n.length));
-};
-
-let bayer4x4ThresholdMap = [
-	[  15, 135,  45, 165 ],
-	[ 195,  75, 225, 105 ],
-	[  60, 180,  30, 150 ],
-	[ 240, 120, 210,  90 ]
-];
-let bayer8x8ThresholdMap = [
-	[  4, 192,  51, 239,  16, 204,  63, 251],
-	[129,  67, 177, 114, 141,  78, 188, 126],
-	[ 35, 224,  20, 208,  47, 235,  31, 220],
-	[161,  98, 145,  82, 173, 110, 157,  94],
-	[ 12, 200,  59, 247,   8, 196,  55, 243],
-	[137,  75, 184, 122, 133,  71, 180, 118],
-	[ 43, 231,  27, 216,  39, 228,  24, 212],
-	[169, 106, 153,  90, 165, 102, 149,  86]
-];
-
-/*
- * ScreenAniStream
- * custom PixelStream prototype to convert gif frames to ZX-Spectrum screen format.
- */
+const fs = require('fs');
+const inherits = require('util').inherits;
+const BufferList = require('bl');
+const PixelStream = require('pixel-stream');
+const dither = require('./dither');
+const toWidth = require('./utils').toWidth;
+const downHL = require('./utils').downHL;
+//-----------------------------------------------------------------------------
 function ScreenAniStream (opt) {
 	PixelStream.call(this);
 
@@ -41,15 +42,15 @@ function ScreenAniStream (opt) {
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
 }
-util.inherits(ScreenAniStream, PixelStream);
+inherits(ScreenAniStream, PixelStream);
 
-//---------------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 ScreenAniStream.prototype._start = function (done) {
-	console.log('[ScreenAniStream] image encoding started (dither:%s, attr:%d)...',
+	console.log('image encoding started (dither:%s, attr:%d)...',
 			this.ditherMethod, this.fillAttr);
 
 	if (this.format.colorSpace !== 'rgb') {
-		console.warn("[ScreenAniStream] colorSpace won't be different from RGB!");
+		console.warn("colorSpace won't be different from RGB!");
 		done("colorSpace won't be different from RGB!");
 		return false;
 	}
@@ -60,7 +61,7 @@ ScreenAniStream.prototype._start = function (done) {
 		thumb_height = 192;
 
 	if (this._frameSize !== (width * height * 3)) {
-		console.warn("[ScreenAniStream] invalid frameSize!");
+		console.warn("invalid frameSize!");
 	}
 
 	let wdeg = Math.ceil(width / thumb_width);
@@ -145,7 +146,10 @@ ScreenAniStream.prototype._endFrame = function (done) {
 	speccy.fill(0);
 	for (let dstY = p.offset.y, srcY = 0; srcY < height; srcY++, dstY++) {
 		for (let dstX = p.offset.x, srcX = 0; srcX < width; srcX++, dstX++) {
-			speccy[dstX + (dstY * 256)] = this.dither(render, srcX, srcY, width);
+			speccy[dstX + (dstY * 256)] =
+				(dither(this.ditherMethod, render, srcX, srcY, width)
+					> this.threshold)
+						? 1 : 0;
 		}
 	}
 
@@ -161,7 +165,7 @@ ScreenAniStream.prototype._endFrame = function (done) {
 			screen[dstX] = byte;
 		}
 
-		hl = this.downHL(hl);
+		hl = downHL(hl);
 	}
 
 	fs.writeFile(this.outputName + toWidth(this.frameCounter, 3) + '.scr', screen);
@@ -214,58 +218,5 @@ ScreenAniStream.prototype.resizeBuffer = function (input, p) {
 
 	return result;
 };
-
-ScreenAniStream.prototype.dither = function (buffer, x, y, w) {
-	let ptr = x + (y * w),
-		value = buffer[ptr], err,
-		thresholded = (value > this.threshold) ? 255 : 0;
-
-	switch (this.ditherMethod) {
-		case 'bayer4':
-			value = (value + bayer4x4ThresholdMap[x % 4][y % 4]) >>> 1;
-			break;
-
-		case 'bayer':
-		case 'bayer8':
-			value = (value + bayer8x8ThresholdMap[x % 8][y % 8]) >>> 1;
-			break;
-
-		case 'floydsteinberg':
-			err = Math.max(0, value - thresholded) >>> 4;
-
-			buffer[ptr + 1]     += err * 7;
-			buffer[ptr + w]     += err * 5;
-			buffer[ptr + w - 1] += err * 3;
-			buffer[ptr + w + 1] += err * 1;
-			break;
-
-		case 'atkinson':
-			err = Math.max(0, value - thresholded) >>> 3;
-
-			buffer[ptr + 1]     += err;
-			buffer[ptr + 2]     += err;
-			buffer[ptr + w]     += err;
-			buffer[ptr + w - 1] += err;
-			buffer[ptr + w + 1] += err;
-			buffer[ptr + w + w] += err;
-			break;
-	}
-
-	return (value > this.threshold) ? 1 : 0;
-};
-
-ScreenAniStream.prototype.downHL = function (hl) {
-	var h = hl >>> 8,
-		l = hl & 255;
-
-	h++;
-	if (!(h & 7)) {
-		l += 32;
-		if (l < 256)
-			h -= 8;
-	}
-
-	return (h << 8) | (l & 255);
-};
-
+//-----------------------------------------------------------------------------
 module.exports = ScreenAniStream;
