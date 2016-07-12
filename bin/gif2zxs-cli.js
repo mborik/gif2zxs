@@ -13,6 +13,13 @@ let cli = meow(`
 	Options:
 		-d, --dir              Output directory
 		-t, --threshold        Threshold integer value (0..255, default 128)
+		-a, --attr             ZX-Spectrum color attribute value (0..127, default 56)
+		-r, --resizer          Image resample method:
+		    "none"             Nearest-neighbor (default)
+		    "bilinear"         Bilinear interpolation
+		    "bicubic"          Bicubic interpolation
+		    "hermite"          Hermite curve interpolation
+		    "bezier"           Bezier curve interpolation
 		--dither               Dither method:
 		    "none"             Simple threshold, no dither (default)
 		    "bayer4"           Bayer 4x4 matrix ordered dither
@@ -23,12 +30,14 @@ let cli = meow(`
 		-h, --help             Show help
 		-v, --version          Version number
 `, {
-	string:  [ 'dither' ],
+	string:  [ 'dither', 'resizer' ],
 	alias: {
-		h: 'help',
-		v: 'version',
+		d: 'dir',
 		t: 'threshold',
-		d: 'dir'
+		a: 'attr',
+		r: 'resizer',
+		h: 'help',
+		v: 'version'
 	}
 });
 

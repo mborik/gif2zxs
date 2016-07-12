@@ -1,4 +1,9 @@
 /**
+ * Dithering methods that can be applied to monochromatic bitmap data:
+ * - Bayer's matrix ordered dither methods (4x4 or 8x8 matrixes)
+ * - Floyd-Steinberg's error diffusion
+ * - Atkinson's error diffusion
+ *
  * Copyright (c) 2016 Martin Bórik <mborik@users.sourceforge.net>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy

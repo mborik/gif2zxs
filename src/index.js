@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const GIFDecoder = require('gif-stream/decoder');
 const ScreenAniStream = require('./scr-stream');
+const clamp = require('./utils').clamp;
 //-----------------------------------------------------------------------------
 const gif2zxs = function (file, opt) {
 	let cwd = process.cwd();
@@ -54,8 +55,10 @@ const gif2zxs = function (file, opt) {
 		opt.dir = dir;
 	}
 
-	if (opt.threshold && parseInt(args.threshold, 10) !== NaN)
-		opt.threshold = parseInt(args.threshold, 10);
+	if (opt.threshold && parseInt(opt.threshold, 10) !== NaN)
+		opt.threshold = clamp(parseInt(opt.threshold, 10), 0, 255);
+	if (opt.attr && parseInt(opt.attr, 10) !== NaN)
+		opt.attr = clamp(parseInt(opt.attr, 10), 0, 127);
 
 	opt.name = path.basename(file, ext);
 	console.log('processing `%s`...', file);

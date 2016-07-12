@@ -28,9 +28,10 @@ const fs = require('fs');
 const inherits = require('util').inherits;
 const BufferList = require('bl');
 const PixelStream = require('pixel-stream');
-const dither = require('./dither');
 const toWidth = require('./utils').toWidth;
 const downHL = require('./utils').downHL;
+const dither = require('./dither');
+const resize = require('./resize');
 //-----------------------------------------------------------------------------
 function ScreenAniStream (opt) {
 	PixelStream.call(this);
@@ -38,6 +39,7 @@ function ScreenAniStream (opt) {
 	this.buffer = new BufferList;
 
 	this.outputName = (opt.dir || '.') + '/' + (opt.name || 'output');
+	this.resizeMethod = opt.resizer || 'none';
 	this.ditherMethod = opt.dither || 'threshold';
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
@@ -46,8 +48,9 @@ inherits(ScreenAniStream, PixelStream);
 
 //-----------------------------------------------------------------------------
 ScreenAniStream.prototype._start = function (done) {
-	console.log('image encoding started (dither:%s, attr:%d)...',
-			this.ditherMethod, this.fillAttr);
+	console.log('image encoding started (W:%d, H:%d, resizer:%s, dither:%s, attr:%d)...',
+			this.format.width, this.format.height,
+			this.resizeMethod, this.ditherMethod, this.fillAttr);
 
 	if (this.format.colorSpace !== 'rgb') {
 		console.warn("colorSpace won't be different from RGB!");
@@ -64,57 +67,49 @@ ScreenAniStream.prototype._start = function (done) {
 		console.warn("invalid frameSize!");
 	}
 
-	let wdeg = Math.ceil(width / thumb_width);
-	let hdeg = Math.ceil(height / thumb_height);
-	let scale_den = Math.max(wdeg, hdeg, 1);
+	let wdeg = width / thumb_width;
+	let hdeg = height / thumb_height;
+	let scale = Math.max(wdeg, hdeg, 1);
 
-	let denom_width = Math.round(width / scale_den);
-	let denom_height = Math.round(height / scale_den);
+	let denom_width = Math.round(width / scale);
+	let denom_height = Math.round(height / scale);
 
-	let offset_width = (thumb_width - denom_width) / 2;
-	let offset_height = (thumb_height - denom_height) / 2;
+	let offset_width = Math.trunc((thumb_width - denom_width) / 2);
+	let offset_height = Math.trunc((thumb_height - denom_height) / 2);
 
 	this.props = {
-		scale: scale_den,
+		width: (this.width = width),
+		height: (this.height = height),
+		scale: scale,
 		result: {
 			width: denom_width,
 			height: denom_height
 		},
 		offset: {
-			x: (0 | offset_width),
-			y: (0 | offset_height)
+			x: offset_width,
+			y: offset_height
 		}
 	};
 
-	width = Math.max(width, denom_width * scale_den);
-	height = Math.max(height, denom_height * scale_den);
+	this.render = new Buffer(width * height * 3);
+	this.render.fill(0);
 
-	this.props.width = this.width = width;
-	this.props.height = this.height = height;
-	this.render = new Buffer(width * height);
 	this.frameCounter = 0;
-
 	done();
 };
 
 ScreenAniStream.prototype._startFrame = function (frame, done) {
-	console.log('[ScreenAniStream] frame %s (X:%d, Y:%d, W:%d, H:%d)',
+	console.log('frame %s, section (X:%d, Y:%d, W:%d, H:%d)',
 			toWidth(this.frameCounter, 3),
 			frame.x, frame.y,
 			frame.width, frame.height);
 
 	this.props.frame = Object.assign({}, frame);
-	this.props.frame.buffer = new BufferList;
 	done();
 };
 
 ScreenAniStream.prototype._writePixels = function (data, done) {
 	this.buffer.append(data);
-
-	let res = this.rgb2gray(data);
-	this.props.frame.buffer.append(res);
-	this.buffer.consume(res.length * 3);
-
 	this.push();
 	done();
 };
@@ -126,28 +121,33 @@ ScreenAniStream.prototype._endFrame = function (done) {
 		height = this.height;
 
 	for (let srcY = 0, dstY = frame.y; srcY < frame.height; srcY++, dstY++) {
-		frame.buffer.copy(
-			this.render,					// dest
-			(dstY * width) + frame.x,		// destStart
-			(srcY * frame.width),			// srcStart
-			((srcY + 1) * frame.width) - 1	// srcEnd
+		this.buffer.copy(
+			this.render,                         // dest
+			((dstY * width) + frame.x) * 3,      // destStart
+			(srcY * frame.width * 3),            // srcStart
+			((srcY + 1) * frame.width * 3) - 1   // srcEnd
 		);
 	}
 
-	let render = new Buffer(this.render),
+	this.buffer.consume(frame.width * frame.height * 3);
+
+	let image = new Buffer(this.render),
 		speccy = new Buffer(256 * 192);
+	speccy.fill(0);
 
 	if (p.scale > 1) {
-		render = this.resizeBuffer(render, p);
+		image = new resize(this.resizeMethod, image, p);
 		width = p.result.width;
 		height = p.result.height;
+
+		console.log('\tfull-frame resized to (W:%d, H:%d)', width, height);
 	}
 
-	speccy.fill(0);
+	let mono = this.rgb2gray(image);
 	for (let dstY = p.offset.y, srcY = 0; srcY < height; srcY++, dstY++) {
 		for (let dstX = p.offset.x, srcX = 0; srcX < width; srcX++, dstX++) {
 			speccy[dstX + (dstY * 256)] =
-				(dither(this.ditherMethod, render, srcX, srcY, width)
+				(dither(this.ditherMethod, mono, srcX, srcY, width)
 					> this.threshold)
 						? 1 : 0;
 		}
@@ -175,7 +175,7 @@ ScreenAniStream.prototype._endFrame = function (done) {
 
 // transforms RGB colorspace into grayscale
 ScreenAniStream.prototype.rgb2gray = function (data) {
-	let res = new Buffer(data.length / 3 | 0);
+	let res = new Buffer(Math.ceil(data.length / 3));
 	let i = 0, j = 0;
 
 	while (data.length - i >= 3) {
@@ -183,40 +183,6 @@ ScreenAniStream.prototype.rgb2gray = function (data) {
 	}
 
 	return res;
-};
-
-// nearest-neigbour down-scaling
-ScreenAniStream.prototype.resizeBuffer = function (input, p) {
-	let x, y, i,
-		mean = 0,
-		scaled = new Buffer(p.width * p.result.height);
-
-	for (let srcY = 0, dstY = 0; srcY < p.height; srcY += p.scale, dstY++) {
-		for (x = 0; x < p.width; x++) {
-			mean = 0;
-
-			for (y = srcY, i = 0; i < p.scale; i++, y++)
-				mean += input[x + (y * p.width)];
-
-			mean /= p.scale;
-			scaled[x + (dstY * p.width)] = Math.round(mean);
-		}
-	}
-
-	let result = new Buffer(p.result.width * p.result.height);
-	for (y = 0; y < p.result.height; y++) {
-		for (let srcX = 0, dstX = 0; srcX < p.width; srcX += p.scale, dstX++) {
-			mean = 0;
-
-			for (x = srcX, i = 0; i < p.scale; i++, x++)
-				mean += scaled[x + (y * p.width)];
-
-			mean /= p.scale;
-			result[dstX + (y * p.result.width)] = Math.round(mean);
-		}
-	}
-
-	return result;
 };
 //-----------------------------------------------------------------------------
 module.exports = ScreenAniStream;

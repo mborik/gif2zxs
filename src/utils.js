@@ -31,7 +31,7 @@ module.exports = {
 	 * @param {number} upper boundary
 	 * @return {number} clamped value
 	 */
-	'clamp': (val, min, max) => Math.max(min, Math.min(max, val)),
+	'clamp': (val, min, max) => Math.max(min || 0, Math.min(max || 255, val)),
 
 	/**
 	 * Formats positive integer number to given number of places prefixed by 0.
@@ -63,5 +63,5 @@ module.exports = {
 
 		return (h << 8) | (l & 255);
 	}
-}
+};
 //-----------------------------------------------------------------------------
