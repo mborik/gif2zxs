@@ -43,6 +43,7 @@ function ScreenAniStream (opt) {
 	this.ditherMethod = opt.dither || 'threshold';
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
+	this.aniMode = !!opt.ani;
 }
 inherits(ScreenAniStream, PixelStream);
 
@@ -110,7 +111,6 @@ ScreenAniStream.prototype._startFrame = function (frame, done) {
 
 ScreenAniStream.prototype._writePixels = function (data, done) {
 	this.buffer.append(data);
-	this.push();
 	done();
 };
 
@@ -168,7 +168,15 @@ ScreenAniStream.prototype._endFrame = function (done) {
 		hl = downHL(hl);
 	}
 
-	fs.writeFile(this.outputName + toWidth(this.frameCounter, 3) + '.scr', screen);
+	this.push(screen.slice(0, 6144));
+
+	// this hack for first screen is for one-frame-gifs or animation output
+	let fnadd = (this.frameCounter) ? toWidth(this.frameCounter, 3) : '';
+	if (!this.aniMode || !this.frameCounter)
+		fs.writeFile(this.outputName + fnadd + '.scr', screen);
+	if (this.frameCounter === 1)
+		fs.renameSync(this.outputName + '.scr', this.outputName + '000.scr');
+
 	this.frameCounter++;
 	done();
 };

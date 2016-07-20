@@ -27,3 +27,8 @@ npm install -g gif2zxs
 >  * `"bayer8"`         --- Bayer 8x8 matrix ordered dither
 >  * `"floydsteinberg"` --- Floyd-Steinberg error diffusion
 >  * `"atkinson"`       --- Atkinson error diffusion
+>- `--ani`              --- output animation binary file of type:
+>  * `"xor"`            --- ZX-Spectrum screen mode, XOR method _(default)_
+>  * `"direct"`         --- ZX-Spectrum screen mode, direct write method
+>  * `"linear-xor"`     --- linear screen mode, XOR method
+>  * `"linear-direct"`  --- linear screen mode, direct write method

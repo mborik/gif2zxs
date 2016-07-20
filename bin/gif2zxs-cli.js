@@ -26,11 +26,16 @@ let cli = meow(`
 		    "bayer8"           Bayer 8x8 matrix ordered dither
 		    "floydsteinberg"   Floyd-Steinberg error diffusion
 		    "atkinson"         Atkinson error diffusion
+		--ani                  Output animation binary file of type:
+			"xor"              ZX-Spectrum screen mode, XOR method (default)
+			"direct"           ZX-Spectrum screen mode, direct write method
+			"linear-xor"       Linear screen mode, XOR method
+			"linear-direct"    Linear screen mode, direct write method
 
 		-h, --help             Show help
 		-v, --version          Version number
 `, {
-	string:  [ 'dither', 'resizer' ],
+	string:  [ 'ani', 'dither', 'resizer' ],
 	alias: {
 		d: 'dir',
 		t: 'threshold',

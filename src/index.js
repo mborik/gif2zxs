@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const GIFDecoder = require('gif-stream/decoder');
 const ScreenAniStream = require('./scr-stream');
+const SpeccyAnimationStream = require('./ani-stream');
 const clamp = require('./utils').clamp;
 //-----------------------------------------------------------------------------
 const gif2zxs = function (file, opt) {
@@ -65,7 +66,8 @@ const gif2zxs = function (file, opt) {
 
 	fs.createReadStream(filePath)
 		.pipe(new GIFDecoder)
-		.pipe(new ScreenAniStream(opt));
+		.pipe(new ScreenAniStream(opt))
+		.pipe(new SpeccyAnimationStream(opt));
 
 	return true;
 };
