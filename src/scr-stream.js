@@ -43,15 +43,17 @@ function ScreenAniStream (opt) {
 	this.ditherMethod = opt.dither || 'threshold';
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
+	this.skip = opt.skip || 0;
 	this.aniMode = !!opt.ani;
 }
 inherits(ScreenAniStream, PixelStream);
 
 //-----------------------------------------------------------------------------
 ScreenAniStream.prototype._start = function (done) {
-	console.log('image encoding started (W:%d, H:%d, resizer:%s, dither:%s, attr:%d)...',
+	console.log('image encoding started (W:%d, H:%d, resizer:%s, dither:%s, attr:%d, skip:%d)...',
 			this.format.width, this.format.height,
-			this.resizeMethod, this.ditherMethod, this.fillAttr);
+			this.resizeMethod, this.ditherMethod,
+			this.fillAttr, this.skip);
 
 	if (this.format.colorSpace !== 'rgb') {
 		console.warn("colorSpace won't be different from RGB!");
@@ -95,16 +97,25 @@ ScreenAniStream.prototype._start = function (done) {
 	this.render = new Buffer(width * height * 3);
 	this.render.fill(0);
 
+	this.skip++;
 	this.frameCounter = 0;
+	this.nextFrameToProcess = 0;
+	this.lastFrameSize = -1;
 	done();
 };
 
 ScreenAniStream.prototype._startFrame = function (frame, done) {
 	console.log('frame %s, section (X:%d, Y:%d, W:%d, H:%d)',
-			toWidth(this.frameCounter, 3),
-			frame.x, frame.y,
-			frame.width, frame.height);
+		toWidth(this.frameCounter, 3),
+		frame.x, frame.y,
+		frame.width, frame.height);
 
+	if (this.buffer.length >= this.lastFrameSize) {
+		this.buffer.consume(this.lastFrameSize);
+		console.log('\t\t\tSKIPPED...');
+	}
+
+	this.lastFrameSize = frame.width * frame.height * 3;
 	this.props.frame = Object.assign({}, frame);
 	done();
 };
@@ -118,7 +129,8 @@ ScreenAniStream.prototype._endFrame = function (done) {
 	let p = this.props,
 		frame = p.frame,
 		width = this.width,
-		height = this.height;
+		height = this.height,
+		frameSize = frame.width * frame.height * 3;
 
 	for (let srcY = 0, dstY = frame.y; srcY < frame.height; srcY++, dstY++) {
 		this.buffer.copy(
@@ -129,10 +141,44 @@ ScreenAniStream.prototype._endFrame = function (done) {
 		);
 	}
 
-	this.buffer.consume(frame.width * frame.height * 3);
+	if (this.frameCounter === this.nextFrameToProcess) {
+		let screen = this.processFrame();
 
-	let image = new Buffer(this.render),
+		this.push(screen.slice(0, 6144));
+		this.buffer.consume(frameSize);
+
+		let fnadd = (this.frameCounter) ? toWidth(this.frameCounter, 3) : '';
+		if (!this.aniMode || this.frameCounter === 0)
+			fs.writeFile(this.outputName + fnadd + '.scr', screen);
+
+		// this hack for first screen is for one-frame-gifs or animation output
+		if (this.frameCounter === this.skip)
+			fs.renameSync(this.outputName + '.scr', this.outputName + '000.scr');
+
+		this.nextFrameToProcess += this.skip;
+	}
+
+	this.frameCounter++;
+	done();
+};
+
+ScreenAniStream.prototype._end = function (done) {
+	if (this.buffer.length >= this.lastFrameSize) {
+		let screen = this.processFrame();
+		this.push(screen.slice(0, 6144));
+		this.buffer.consume(this.lastFrameSize);
+	}
+	done();
+};
+
+// process one speccy frame from render buffer
+ScreenAniStream.prototype.processFrame = function () {
+	let p = this.props,
+		width = this.width,
+		height = this.height,
+		image = new Buffer(this.render),
 		speccy = new Buffer(256 * 192);
+
 	speccy.fill(0);
 
 	if (p.scale > 1) {
@@ -168,17 +214,7 @@ ScreenAniStream.prototype._endFrame = function (done) {
 		hl = downHL(hl);
 	}
 
-	this.push(screen.slice(0, 6144));
-
-	// this hack for first screen is for one-frame-gifs or animation output
-	let fnadd = (this.frameCounter) ? toWidth(this.frameCounter, 3) : '';
-	if (!this.aniMode || !this.frameCounter)
-		fs.writeFile(this.outputName + fnadd + '.scr', screen);
-	if (this.frameCounter === 1)
-		fs.renameSync(this.outputName + '.scr', this.outputName + '000.scr');
-
-	this.frameCounter++;
-	done();
+	return screen;
 };
 
 // transforms RGB colorspace into grayscale

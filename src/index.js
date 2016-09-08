@@ -56,10 +56,15 @@ const gif2zxs = function (file, opt) {
 		opt.dir = dir;
 	}
 
-	if (opt.threshold && parseInt(opt.threshold, 10) !== NaN)
-		opt.threshold = clamp(parseInt(opt.threshold, 10), 0, 255);
-	if (opt.attr && parseInt(opt.attr, 10) !== NaN)
-		opt.attr = clamp(parseInt(opt.attr, 10), 0, 127);
+	let value = parseInt(opt.threshold, 10);
+	if (opt.threshold && value !== NaN)
+		opt.threshold = clamp(value, 0, 255);
+	value = parseInt(opt.attr, 10);
+	if (opt.attr && value !== NaN)
+		opt.attr = clamp(value, 0, 127);
+	value = parseInt(opt.skip, 10);
+	if (opt.skip && value !== NaN)
+		opt.skip = Math.max(value, 0);
 
 	opt.name = path.basename(file, ext);
 	console.log('processing `%s`...', file);

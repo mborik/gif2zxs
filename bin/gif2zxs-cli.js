@@ -14,6 +14,7 @@ let cli = meow(`
 		-d, --dir              Output directory
 		-t, --threshold        Threshold integer value (0..255, default 128)
 		-a, --attr             ZX-Spectrum color attribute value (0..127, default 56)
+		-s, --skip             skip number of frames between (default 0)
 		-r, --resizer          Image resample method:
 		    "none"             Nearest-neighbor (default)
 		    "bilinear"         Bilinear interpolation
@@ -40,6 +41,7 @@ let cli = meow(`
 		d: 'dir',
 		t: 'threshold',
 		a: 'attr',
+		s: 'skip',
 		r: 'resizer',
 		h: 'help',
 		v: 'version'

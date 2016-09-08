@@ -29,7 +29,6 @@ const inherits = require('util').inherits;
 const BufferList = require('bl');
 const Transform = require('stream').Transform;
 const toWidth = require('./utils').toWidth;
-const downHL = require('./utils').downHL;
 //-----------------------------------------------------------------------------
 function SpeccyAnimationStream (opt) {
 	Transform.call(this);
@@ -97,7 +96,7 @@ SpeccyAnimationStream.prototype._flush = function (done) {
 SpeccyAnimationStream.prototype.compareFrames = function () {
 	let frame = this.inputBuffer.slice(0, 6144);
 	if (this.prevFrame) {
-		let i, compared = new Buffer(6144);
+		let i, blocks = 0, compared = new Buffer(6144);
 
 		for (i = 0; i < 6144; i++)
 			compared[i] = frame[i] ^ this.prevFrame[i];
@@ -108,10 +107,12 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 
 			this.findStandardBlock(compared, i,
 				(this.format === 'xor' ? compared : frame));
+			blocks++;
 		}
 
 		// flag end of frame...
-		this.outputBuffer.append(new Buffer([0]));
+		if (blocks)
+			this.outputBuffer.append(new Buffer([0]));
 		this.frameCounter++;
 	}
 
@@ -119,37 +120,37 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 };
 //-----------------------------------------------------------------------------
 SpeccyAnimationStream.prototype.findStandardBlock = function (src, start, data) {
-	let i = start, l, h,
+	let ptr = start, i, c,
 		block = new Buffer(8);
 	block.fill(0);
 
-	for (l = 0, h = 0; i < 6144, l < 8; i += 256, l++) {
-		block[l] = data[i];
+	for (i = 0, c = 0; ptr < 6144, i < 8; ptr += 256, i++) {
+		block[i] = data[ptr];
 
-		if (src[i])
-			h = 0;
-		else if (++h > this.holeTolerance)
+		if (src[ptr])
+			c = 0;
+		else if (++c > this.holeTolerance)
 			break;
 	}
 
 	// trim end...
-	i = l++;
-	while (!block[i--])
-		l--;
+	c = i++;
+	while (!block[c--])
+		i--;
 
-	this.storeBlock(start, block.slice(0, l));
+	this.storeBlock(start, block.slice(0, i));
 
 	// clean block from source buffer...
-	for (i = start, --l; l >= 0; i += 256, l--)
-		src[i] = 0;
+	for (ptr = start, --i; i >= 0; ptr += 256, i--)
+		src[ptr] = 0;
 };
 //-----------------------------------------------------------------------------
 SpeccyAnimationStream.prototype.storeBlock = function (adr, data) {
-	let h = ((adr & 0x1f00) >> 8) + 8;
-	let l = (adr & 0xff);
 	let x = (data.length - 1) << 5;
+	let h = ((adr & 0x1f00) >>> 8) + 8;
+	let l = (adr & 0xff);
 
-	this.outputBuffer.append(new Buffer([ x | l, h ]));
+	this.outputBuffer.append(new Buffer([ x | h, l ]));
 	this.outputBuffer.append(data);
 };
 //-----------------------------------------------------------------------------
