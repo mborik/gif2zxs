@@ -45,6 +45,7 @@ function ScreenAniStream (opt) {
 	this.fillAttr = opt.attr || 0x38;
 	this.skip = opt.skip || 0;
 	this.aniMode = !!opt.ani;
+	this.aniLooped = (typeof opt.aniloop === 'boolean') ? opt.aniloop : true;
 }
 inherits(ScreenAniStream, PixelStream);
 
@@ -103,28 +104,27 @@ ScreenAniStream.prototype._start = function (done) {
 	this.lastFrameSize = -1;
 	done();
 };
-
+//-----------------------------------------------------------------------------
 ScreenAniStream.prototype._startFrame = function (frame, done) {
-	console.log('frame %s, section (X:%d, Y:%d, W:%d, H:%d)',
+	console.log('frame %s, section (X:%d, Y:%d, W:%d, H:%d)%s',
 		toWidth(this.frameCounter, 3),
 		frame.x, frame.y,
-		frame.width, frame.height);
+		frame.width, frame.height,
+		(this.frameCounter === this.nextFrameToProcess ? '' : ' ~ SKIP'));
 
-	if (this.buffer.length >= this.lastFrameSize) {
+	if (this.buffer.length >= this.lastFrameSize)
 		this.buffer.consume(this.lastFrameSize);
-		console.log('\t\t\tSKIPPED...');
-	}
 
 	this.lastFrameSize = frame.width * frame.height * 3;
 	this.props.frame = Object.assign({}, frame);
 	done();
 };
-
+//-----------------------------------------------------------------------------
 ScreenAniStream.prototype._writePixels = function (data, done) {
 	this.buffer.append(data);
 	done();
 };
-
+//-----------------------------------------------------------------------------
 ScreenAniStream.prototype._endFrame = function (done) {
 	let p = this.props,
 		frame = p.frame,
@@ -142,14 +142,18 @@ ScreenAniStream.prototype._endFrame = function (done) {
 	}
 
 	if (this.frameCounter === this.nextFrameToProcess) {
-		let screen = this.processFrame();
+		let screen = this.processFrame(),
+			pixels = screen.slice(0, 6144);
 
-		this.push(screen.slice(0, 6144));
+		this.push(pixels);
 		this.buffer.consume(frameSize);
 
 		let fnadd = (this.frameCounter) ? toWidth(this.frameCounter, 3) : '';
 		if (!this.aniMode || this.frameCounter === 0)
 			fs.writeFile(this.outputName + fnadd + '.scr', screen);
+
+		if (this.aniMode && this.aniLooped && this.frameCounter === 0)
+			this.firstAniFrame = pixels;
 
 		// this hack for first screen is for one-frame-gifs or animation output
 		if (this.frameCounter === this.skip)
@@ -161,16 +165,19 @@ ScreenAniStream.prototype._endFrame = function (done) {
 	this.frameCounter++;
 	done();
 };
-
+//-----------------------------------------------------------------------------
 ScreenAniStream.prototype._end = function (done) {
 	if (this.buffer.length >= this.lastFrameSize) {
 		let screen = this.processFrame();
-		this.push(screen.slice(0, 6144));
 		this.buffer.consume(this.lastFrameSize);
+
+		this.push(screen.slice(0, 6144));
+		if (this.aniMode && this.aniLooped)
+			this.push(this.firstAniFrame);
 	}
 	done();
 };
-
+//-----------------------------------------------------------------------------
 // process one speccy frame from render buffer
 ScreenAniStream.prototype.processFrame = function () {
 	let p = this.props,
@@ -216,7 +223,7 @@ ScreenAniStream.prototype.processFrame = function () {
 
 	return screen;
 };
-
+//-----------------------------------------------------------------------------
 // transforms RGB colorspace into grayscale
 ScreenAniStream.prototype.rgb2gray = function (data) {
 	let res = new Buffer(Math.ceil(data.length / 3));

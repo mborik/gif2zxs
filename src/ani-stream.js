@@ -35,7 +35,7 @@ function SpeccyAnimationStream (opt) {
 
 	this.outputName = (opt.dir || '.') + '/' + (opt.name || 'output') + '.ani.bin';
 	this.enabled = !!opt.ani;
-	this.holeTolerance = 2;
+	this.holeTolerance = 1;
 	this.linearOrder = false;
 
 	switch (opt.ani) {
@@ -133,11 +133,8 @@ SpeccyAnimationStream.prototype.findStandardBlock = function (src, start, data) 
 			break;
 	}
 
-	// trim end...
-	c = i++;
-	while (!block[c--])
-		i--;
-
+	// trim whitespace from end and store block...
+	i = Math.min(i + 1, 8) - c;
 	this.storeBlock(start, block.slice(0, i));
 
 	// clean block from source buffer...
