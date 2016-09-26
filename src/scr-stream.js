@@ -32,6 +32,7 @@ const toWidth = require('./utils').toWidth;
 const downHL = require('./utils').downHL;
 const dither = require('./dither');
 const resize = require('./resize');
+const lossy = require('./lossy');
 //-----------------------------------------------------------------------------
 function ScreenAniStream (opt) {
 	PixelStream.call(this);
@@ -44,6 +45,7 @@ function ScreenAniStream (opt) {
 	this.threshold = opt.threshold || 128;
 	this.fillAttr = opt.attr || 0x38;
 	this.skip = opt.skip || 0;
+	this.lossy = opt.lossy || false;
 	this.aniMode = !!opt.ani;
 	this.aniLooped = (typeof opt.aniloop === 'boolean') ? opt.aniloop : true;
 }
@@ -51,10 +53,10 @@ inherits(ScreenAniStream, PixelStream);
 
 //-----------------------------------------------------------------------------
 ScreenAniStream.prototype._start = function (done) {
-	console.log('image encoding started (W:%d, H:%d, resizer:%s, dither:%s, attr:%d, skip:%d)...',
+	console.log('image encoding started (W:%d, H:%d, resizer:%s, dither:%s, attr:%d, skip:%d%s)...',
 			this.format.width, this.format.height,
-			this.resizeMethod, this.ditherMethod,
-			this.fillAttr, this.skip);
+			this.resizeMethod, this.ditherMethod, this.fillAttr,
+			this.skip, (this.lossy ? ', lossy' : ''));
 
 	if (this.format.colorSpace !== 'rgb') {
 		console.warn("colorSpace won't be different from RGB!");
@@ -172,8 +174,9 @@ ScreenAniStream.prototype._end = function (done) {
 		this.buffer.consume(this.lastFrameSize);
 
 		this.push(screen.slice(0, 6144));
-		if (this.aniMode && this.aniLooped)
-			this.push(this.firstAniFrame);
+	}
+	if (this.aniMode && this.aniLooped) {
+		this.push(this.firstAniFrame);
 	}
 	done();
 };
@@ -206,6 +209,9 @@ ScreenAniStream.prototype.processFrame = function () {
 		}
 	}
 
+	if (this.lossy)
+		lossy.applyImageOptimization(speccy);
+
 	let screen = new Buffer(6912);
 	screen.fill(this.fillAttr, 6144);
 
@@ -220,6 +226,9 @@ ScreenAniStream.prototype.processFrame = function () {
 
 		hl = downHL(hl);
 	}
+
+	if (this.lossy)
+		lossy.removeMinorBytes(screen);
 
 	return screen;
 };

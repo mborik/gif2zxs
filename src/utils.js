@@ -62,6 +62,25 @@ module.exports = {
 		}
 
 		return (h << 8) | (l & 255);
+	},
+
+	/**
+	 * Group the array of the objects by properties defined by group functiion.
+	 * @param {array} array of objects
+	 * @param {function} fn callback which should return the array with values
+	 *        of the properties which we want to group by sorted by importance.
+	 * @return {array} array of grouped arrays of the source objects.
+	 */
+	'arrayGroupBy': (array, fn) => {
+		let groups = {};
+
+		array.forEach((obj) => {
+			let group = fn(obj);
+			groups[group] = groups[group] || [];
+			groups[group].push(obj);
+		});
+
+		return Object.keys(groups).map((group) => groups[group]);
 	}
 };
 //-----------------------------------------------------------------------------

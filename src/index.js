@@ -65,6 +65,12 @@ const gif2zxs = function (file, opt) {
 	value = parseInt(opt.skip, 10);
 	if (opt.skip && value !== NaN)
 		opt.skip = Math.max(value, 0);
+	value = parseInt(opt.holes, 10);
+	if (opt.holes && value !== NaN)
+		opt.holes = clamp(value, 1, 7);
+	value = parseInt(opt.scanline, 10);
+	if (opt.scanline && value !== NaN)
+		opt.scanline = clamp(value, 1, 2);
 
 	opt.name = path.basename(file, ext);
 	console.log('processing `%s`...', file);
