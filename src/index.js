@@ -38,7 +38,8 @@ const gif2zxs = function (file, opt) {
 	try {
 		if (!fs.statSync(filePath).isFile())
 			throw new Error("ENOTFILE");
-	} catch (err) {
+	}
+	catch (err) {
 		console.error('Invalid file: "%s" (%s)', filePath,
 			(err.code || err.message || err));
 		return false;

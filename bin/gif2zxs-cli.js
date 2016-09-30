@@ -29,8 +29,8 @@ let cli = meow(`
 		-a, --ani              Output animation binary file of type:
 			"xor"              ZX-Spectrum screen mode, XOR method (default)
 			"direct"           ZX-Spectrum screen mode, direct write method
-			"linear-xor"       Linear screen mode, XOR method
-			"linear-direct"    Linear screen mode, direct write method
+			"plain-xor"        Plain (scanline oriented) screen mode, XOR method
+			"plain-direct"     Plain (scanline oriented) screen mode, direct write method
 		-s, --skip             Skip number of frames between each ani-frame (default 0)
 		--lossy                Lossy conversion post-processing
 		--holes                Hole tolerance while storing ani-chunk (1..7, default 2)

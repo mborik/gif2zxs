@@ -29,6 +29,7 @@ const inherits = require('util').inherits;
 const BufferList = require('bl');
 const Transform = require('stream').Transform;
 const toWidth = require('./utils').toWidth;
+const downHL = require('./utils').downHL;
 const arrayGroupBy = require('./utils').arrayGroupBy;
 //-----------------------------------------------------------------------------
 function SpeccyAnimationStream (opt) {
@@ -38,13 +39,14 @@ function SpeccyAnimationStream (opt) {
 	this.enabled = !!opt.ani;
 	this.holeTolerance = opt.holes || 2;
 	this.scanline = opt.scanline || 1;
-	this.linearOrder = false;
+	this.scanlineOrder = false;
 	this.lossy = opt.lossy || false;
+	this.priorLinearBlocks = opt.priorLinear || false;
 
 	switch (opt.ani) {
-		case 'linear-xor':
-		case 'linear-direct':
-			this.linearOrder = true;
+		case 'plain-xor':
+		case 'plain-direct':
+			this.scanlineOrder = true;
 			opt.ani = opt.ani.substr(7);
 			/* nobreak */
 		case 'xor':
@@ -59,7 +61,7 @@ function SpeccyAnimationStream (opt) {
 
 	if (this.enabled)
 		console.log('animation builder started (holeTolerance:%d, format:%s%s, scanline:%d%s)...',
-			this.holeTolerance, this.format, (this.linearOrder ? '[linear]' : ''),
+			this.holeTolerance, this.format, (this.scanlineOrder ? '[plain]' : ''),
 			this.scanline, (this.lossy ? ', lossy' : ''));
 
 	this.inputBuffer = new BufferList;
@@ -73,6 +75,7 @@ function SpeccyAnimationStream (opt) {
 	this.consumed = 0;
 
 	this.tempChunks = [];
+	this.linearChunks = [];
 	this.storedChunks = {};
 }
 inherits(SpeccyAnimationStream, Transform);
@@ -118,19 +121,46 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 		// xor compareBuffer with frame xored with previous.
 		// (reason for that is if there are some fragment on screen which
 		// was ignored by lossy mode enabled)
-		for (i = 0; i < 6144; i++)
-			this.compareBuffer[i] ^= (frame[i] ^ this.prevFrame[i]);
+		for (let x, y = 0, i = 0; y < 192; y += this.scanline) {
+			for (x = 0; x < 32; x++, i++)
+				this.compareBuffer[i] ^= (frame[i] ^ this.prevFrame[i]);
 
-		// clear temporary chunk buffer...
+			i -= 32;
+			for (x = 0; x < this.scanline; x++)
+				i = downHL(i);
+		}
+
+		// clear temporary chunk buffers...
 		this.tempChunks.length = 0;
+		this.linearChunks.length = 0;
+
+		// which buffer will be used to dig the data from?
+		let fromBuffer = (this.format === 'xor' ? this.compareBuffer : frame);
+
+		// define generator functions by the priority of block...
+		let findBlockMode1 = (this.priorLinearBlocks ? this.findLinearBlock : this.findStandardBlock);
+		let findBlockMode2 = (this.priorLinearBlocks ? this.findStandardBlock : this.findLinearBlock);
 
 		// chunk collector...
 		for (i = 0; i < 6144; i++) {
 			if (this.compareBuffer[i] === 0)
 				continue;
 
-			this.findStandardBlock(this.compareBuffer, i,
-				(this.format === 'xor' ? this.compareBuffer : frame));
+			let fn1 = findBlockMode1.call(this, this.compareBuffer, i, fromBuffer), ret1;
+			let fn2 = findBlockMode2.call(this, this.compareBuffer, i, fromBuffer), ret2;
+
+			ret1 = fn1.next();
+			if (ret1.value) {
+				ret2 = fn2.next();
+				if (ret2.value) {
+					if (this.lossy)
+						continue;
+
+					fn1.next();
+				}
+				else fn2.next();
+			}
+			else fn1.next();
 		}
 
 		this.processChunks();
@@ -139,13 +169,14 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 	this.prevFrame = frame;
 };
 //-----------------------------------------------------------------------------
-SpeccyAnimationStream.prototype.findStandardBlock = function (src, start, data) {
+SpeccyAnimationStream.prototype.findStandardBlock = function *(src, start, data) {
 	let ptr = start, i, c,
+		add = 256 * this.scanline,
 		block = new Buffer(8);
 	block.fill(0);
 
 	// collect data from one attribute chunk with given tolerance for zeroes...
-	for (i = 0, c = 0; ptr < 6144, i < 8; ptr += 256, i++) {
+	for (i = 0, c = 0; ptr < 6144, i < 8; ptr += add, i++) {
 		block[i] = data[ptr];
 
 		if (src[ptr])
@@ -157,11 +188,10 @@ SpeccyAnimationStream.prototype.findStandardBlock = function (src, start, data) 
 	// trim whitespace from end...
 	i = Math.min(i + 1, 8) - c;
 
-	// ignore the chunk if it's too short and lossy mode is enabled...
-	if (i < 2 && this.lossy)
-		return;
+	// yield back if the chunk is too short...
+	yield (i < 2);
 
-	// store the chunk...
+	// it's okay, store the chunk...
 	this.tempChunks.push({
 		length: i,
 		buffer: block,
@@ -174,7 +204,44 @@ SpeccyAnimationStream.prototype.findStandardBlock = function (src, start, data) 
 	});
 
 	// clean block from source buffer...
-	for (ptr = start, --i; i >= 0; ptr += 256, i--)
+	for (ptr = start, --i; i >= 0; ptr += add, i--)
+		src[ptr] = 0;
+};
+//-----------------------------------------------------------------------------
+SpeccyAnimationStream.prototype.findLinearBlock = function *(src, start, data) {
+	let ptr = start, i, c,
+		block = new Buffer(16);
+	block.fill(0);
+
+	// collect data from one attribute chunk with given tolerance for zeroes...
+	for (i = 0, c = 0; ptr < 6144, i < 16; ptr++, i++) {
+		block[i] = data[ptr];
+
+		if (src[ptr])
+			c = 0;
+		else if (++c > this.holeTolerance)
+			break;
+	}
+
+	// trim whitespace from end...
+	i = Math.min(i + 1, 16) - c;
+
+	// yield back if the chunk is too short...
+	yield (i < 2);
+
+	// it's okay, store the chunk...
+	i = Math.ceil(i / 2) << 1;
+	this.linearChunks.push({
+		length: i,
+		buffer: block,
+		scradr: start,
+		h: 7, // special flag for linear chunk
+		l: (start & 0xff),
+		x: ((i >> 1) - 1) << 5
+	});
+
+	// clean block from source buffer...
+	for (ptr = start, --i; i >= 0; ptr++, i--)
 		src[ptr] = 0;
 };
 //-----------------------------------------------------------------------------
@@ -190,7 +257,7 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 		if (!cmp)
 			cmp = (bh > ah) ? 1 : ((bh < ah) ? -1 : 0);
 		return cmp;
-	}
+	};
 
 	// group temporary chunks by hex phrase...
 	let allChunks = [],
@@ -243,15 +310,27 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 		allChunks.push.apply(allChunks, group);
 	});
 
+	// append all linear chunks into stack...
+	allChunks.push.apply(allChunks, this.linearChunks);
+
 	// sort chunks by screen address and store into output buffer...
 	allChunks.sort(sortChunkByAddrAsc);
 	allChunks.forEach((item) => {
 		this.filePointer += 2;
 		this.outputBuffer.append(new Buffer([ item.x | item.h, item.l ]));
 
+		// test if the next chunk is linear and simply store them...
+		if (item.h === 7) {
+			let realh = ((item.scradr & 0x1f00) >>> 8);
+
+			this.outputBuffer.append(new Buffer([ realh ]));
+			this.outputBuffer.append(item.buffer.slice(0, item.length));
+			this.filePointer += (item.length + 1);
+		}
+
 		// if there is solid (not repeatable) chunk or if it's "parent chunk"
 		// store it with the full data in given length...
-		if (item.x) {
+		else if (item.x) {
 			if (item.id)
 				this.storedChunks[item.id].filePtr = this.filePointer;
 
