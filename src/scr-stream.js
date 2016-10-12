@@ -46,6 +46,7 @@ function ScreenAniStream (opt) {
 	this.fillAttr = opt.attr || 0x38;
 	this.skip = opt.skip || 0;
 	this.lossy = opt.lossy || false;
+	this.scanline = opt.scanline || 1;
 	this.aniMode = !!opt.ani;
 	this.aniLooped = (typeof opt.aniloop === 'boolean') ? opt.aniloop : true;
 }
@@ -213,9 +214,11 @@ ScreenAniStream.prototype.processFrame = function () {
 		lossy.applyImageOptimization(speccy);
 
 	let screen = new Buffer(6912);
+
+	screen.fill();
 	screen.fill(this.fillAttr, 6144);
 
-	for (let hl = 0, y = 0; y < 192; y++) {
+	for (let hl = 0, y = 0; y < 192;) {
 		for (let srcX = 0, dstX = hl; srcX < 256; srcX += 8, dstX++) {
 			let byte = 0;
 			for (let x = (srcX + (y * 256)), i = 0; i < 8; x++, i++)
@@ -224,7 +227,8 @@ ScreenAniStream.prototype.processFrame = function () {
 			screen[dstX] = byte;
 		}
 
-		hl = downHL(hl);
+		for (let i = 0; i < this.scanline; i++, y++)
+			hl = downHL(hl);
 	}
 
 	if (this.lossy)

@@ -121,13 +121,12 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 		// xor compareBuffer with frame xored with previous.
 		// (reason for that is if there are some fragment on screen which
 		// was ignored by lossy mode enabled)
-		for (let x, y = 0, i = 0; y < 192; y += this.scanline) {
-			for (x = 0; x < 32; x++, i++)
+		for (let x, y = 0, i, hl = 0; y < 192;) {
+			for (x = 0, i = hl; x < 32; x++, i++)
 				this.compareBuffer[i] ^= (frame[i] ^ this.prevFrame[i]);
 
-			i -= 32;
-			for (x = 0; x < this.scanline; x++)
-				i = downHL(i);
+			for (i = 0; i < this.scanline; i++, y++)
+				hl = downHL(hl);
 		}
 
 		// clear temporary chunk buffers...
@@ -200,7 +199,7 @@ SpeccyAnimationStream.prototype.findStandardBlock = function *(src, start, data)
 		hex: block.slice(0, i).toString('hex'),
 		h: (((start & 0x1f00) >>> 8) + 8),
 		l: (start & 0xff),
-		x: (i - 1) << 5
+		x: (7 & (i - 1)) << 5
 	});
 
 	// clean block from source buffer...
@@ -230,14 +229,14 @@ SpeccyAnimationStream.prototype.findLinearBlock = function *(src, start, data) {
 	yield (i < 2);
 
 	// it's okay, store the chunk...
-	i = Math.ceil(i / 2) << 1;
+	let len = Math.ceil(i / 2) << 1;
 	this.linearChunks.push({
-		length: i,
+		length: len,
 		buffer: block,
 		scradr: start,
 		h: 7, // special flag for linear chunk
 		l: (start & 0xff),
-		x: ((i >> 1) - 1) << 5
+		x: (7 & ((len >>> 1) - 1)) << 5
 	});
 
 	// clean block from source buffer...
@@ -342,8 +341,11 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 		else if (item.parent) {
 			this.filePointer += 2;
 
+			if (item.length < 2 && item.length > 8)
+				console.warn('strange length of reference block (%d)!', item.length);
+
 			let parent = this.storedChunks[item.parent],
-				refLen = (item.length - 1) << 5,
+				refLen = (7 & (item.length - 1)) << 5,
 				refPtr = this.filePointer - parent.filePtr;
 
 			if (refPtr < 0x2000) {
