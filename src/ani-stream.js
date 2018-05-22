@@ -43,6 +43,9 @@ function SpeccyAnimationStream (opt) {
 	this.lossy = opt.lossy || false;
 	this.priorLinearBlocks = opt.priorLinear || false;
 
+	// super secret weapon!!!
+	this.differentBehavior = false;
+
 	switch (opt.ani) {
 		case 'plain-xor':
 		case 'plain-direct':
@@ -73,6 +76,7 @@ function SpeccyAnimationStream (opt) {
 	this.frameCounter = 0;
 	this.filePointer = 0;
 	this.consumed = 0;
+	this.paginationCounter = 0;
 
 	this.tempChunks = [];
 	this.linearChunks = [];
@@ -141,25 +145,33 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 		let findBlockMode2 = (this.priorLinearBlocks ? this.findStandardBlock : this.findLinearBlock);
 
 		// chunk collector...
-		for (i = 0; i < 6144; i++) {
-			if (this.compareBuffer[i] === 0)
-				continue;
+		for (let x, y = 0, i, hl = 0; y < 192;) {
+			for (x = 0, i = hl; x < 32; x++, i++) {
+				if (this.compareBuffer[i] === 0)
+					continue;
 
-			let fn1 = findBlockMode1.call(this, this.compareBuffer, i, fromBuffer), ret1;
-			let fn2 = findBlockMode2.call(this, this.compareBuffer, i, fromBuffer), ret2;
+				let fn1 = findBlockMode1.call(this, this.compareBuffer, { ptr: i, col: x, row: y }, fromBuffer), ret1;
+				let fn2 = findBlockMode2.call(this, this.compareBuffer, { ptr: i, col: x, row: y }, fromBuffer), ret2;
 
-			ret1 = fn1.next();
-			if (ret1.value) {
-				ret2 = fn2.next();
-				if (ret2.value) {
-					if (this.lossy)
-						continue;
-
-					fn1.next();
+				ret1 = fn1.next();
+				if (ret1.value) {
+					ret2 = fn2.next();
+					if (ret2.value) {
+/*
+						if (this.lossy && !this.differentBehavior) {
+							console.warn('something missing (ptr: %s, col: %d, row: %d)!', i.toString(16), x, y);
+							continue;
+						}
+*/
+						fn1.next();
+					}
+					else fn2.next();
 				}
-				else fn2.next();
+				else fn1.next();
 			}
-			else fn1.next();
+
+			for (i = 0; i < this.scanline; i++, y++)
+				hl = downHL(hl);
 		}
 
 		this.processChunks();
@@ -168,20 +180,25 @@ SpeccyAnimationStream.prototype.compareFrames = function () {
 	this.prevFrame = frame;
 };
 //-----------------------------------------------------------------------------
-SpeccyAnimationStream.prototype.findStandardBlock = function *(src, start, data) {
-	let ptr = start, i, c,
-		add = 256 * this.scanline,
-		block = new Buffer(8);
+SpeccyAnimationStream.prototype.findStandardBlock = function *(src, o, data) {
+	let ptr = o.ptr,
+		start = ptr,
+		block = new Buffer(8),
+		i, c, add;
+
 	block.fill(0);
 
 	// collect data from one attribute chunk with given tolerance for zeroes...
-	for (i = 0, c = 0; ptr < 6144, i < 8; ptr += add, i++) {
+	for (i = 0, c = 0; ptr < 6144, i < 8; i++) {
 		block[i] = data[ptr];
 
 		if (src[ptr])
 			c = 0;
 		else if (++c > this.holeTolerance)
 			break;
+
+		for (add = 0; add < this.scanline; add++)
+			ptr = (this.differentBehavior) ? downHL(ptr) : (ptr + 256);
 	}
 
 	// trim whitespace from end...
@@ -191,7 +208,7 @@ SpeccyAnimationStream.prototype.findStandardBlock = function *(src, start, data)
 	yield (i < 2);
 
 	// it's okay, store the chunk...
-	this.tempChunks.push({
+	let result = {
 		length: i,
 		buffer: block,
 		scradr: start,
@@ -200,16 +217,30 @@ SpeccyAnimationStream.prototype.findStandardBlock = function *(src, start, data)
 		h: (((start & 0x1f00) >>> 8) + 8),
 		l: (start & 0xff),
 		x: (7 & (i - 1)) << 5
-	});
+	};
+
+	if (this.differentBehavior) {
+		result.h = ((o.row & 0xf8) >>> 3) + 8;
+		result.l = (o.col & 0x1f) | ((7 & o.row) << 5);
+	}
+
+	this.tempChunks.push(result);
 
 	// clean block from source buffer...
-	for (ptr = start, --i; i >= 0; ptr += add, i--)
+	for (ptr = start; i >= 0; i--) {
 		src[ptr] = 0;
+
+		for (add = 0; add < this.scanline; add++)
+			ptr = (this.differentBehavior) ? downHL(ptr) : (ptr + 256);
+	}
 };
 //-----------------------------------------------------------------------------
-SpeccyAnimationStream.prototype.findLinearBlock = function *(src, start, data) {
-	let ptr = start, i, c,
-		block = new Buffer(16);
+SpeccyAnimationStream.prototype.findLinearBlock = function *(src, o, data) {
+	let ptr = o.ptr,
+		start = ptr,
+		block = new Buffer(16),
+		i, c;
+
 	block.fill(0);
 
 	// collect data from one attribute chunk with given tolerance for zeroes...
@@ -226,21 +257,33 @@ SpeccyAnimationStream.prototype.findLinearBlock = function *(src, start, data) {
 	i = Math.min(i + 1, 16) - c;
 
 	// yield back if the chunk is too short...
-	yield (i < 2);
+	yield (i < 4);
 
 	// it's okay, store the chunk...
 	let len = Math.ceil(i / 2) << 1;
-	this.linearChunks.push({
+	let result = {
 		length: len,
 		buffer: block,
 		scradr: start,
-		h: 7, // special flag for linear chunk
+		hexfull: block.toString('hex'),
+		hex: block.slice(0, len).toString('hex'),
+		h: (((start & 0x1f00) >>> 8) + 8),
 		l: (start & 0xff),
 		x: (7 & ((len >>> 1) - 1)) << 5
-	});
+	};
+
+	if (this.differentBehavior) {
+		result.h = ((o.row & 0xf8) >>> 3) + 8;
+		result.l = (o.col & 0x1f) | ((7 & o.row) << 5);
+	}
+
+	result.realh = result.h + 0x38;
+	result.h = 7, // special flag for linear chunk
+
+	this.tempChunks.push(result);
 
 	// clean block from source buffer...
-	for (ptr = start, --i; i >= 0; ptr++, i--)
+	for (ptr = start; i >= 0; ptr++, i--)
 		src[ptr] = 0;
 };
 //-----------------------------------------------------------------------------
@@ -283,13 +326,14 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 	chunksGrouped.forEach((group) => {
 		let base = group.shift(), storeKey;
 		if (base.length > 2) {
-			if (this.storedChunks[base.hexfull]) {
-				storeKey = base.hexfull;
+			storeKey = base.hexfull;
+			if (this.storedChunks[storeKey]) {
 				base.parent = storeKey;
 				base.x = 0;
 			}
 			else if (group.length) {
-				storeKey = base.id = base.hexfull;
+				base.id = storeKey;
+				base.filePtr = -Infinity;
 				this.storedChunks[storeKey] = base;
 			}
 		}
@@ -312,6 +356,8 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 	// append all linear chunks into stack...
 	allChunks.push.apply(allChunks, this.linearChunks);
 
+	let lastFilePointer = this.filePointer;
+
 	// sort chunks by screen address and store into output buffer...
 	allChunks.sort(sortChunkByAddrAsc);
 	allChunks.forEach((item) => {
@@ -320,9 +366,7 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 
 		// test if the next chunk is linear and simply store them...
 		if (item.h === 7) {
-			let realh = ((item.scradr & 0x1f00) >>> 8);
-
-			this.outputBuffer.append(new Buffer([ realh ]));
+			this.outputBuffer.append(new Buffer([ item.realh ]));
 			this.outputBuffer.append(item.buffer.slice(0, item.length));
 			this.filePointer += (item.length + 1);
 		}
@@ -374,6 +418,25 @@ SpeccyAnimationStream.prototype.processChunks = function () {
 			}
 		}
 	});
+
+	if (this.filePointer >= 16384) {
+		this.outputName = this.outputName.replace(/(\_[0-9a-z])?(\.ani\.bin)$/i, "_" + this.paginationCounter.toString(32) + "$2");
+
+		let buf = this.outputBuffer.slice(0, lastFilePointer);
+		buf.set(new Buffer([2]), buf.length - 1);
+		fs.writeFile(this.outputName, buf);
+
+		console.log('~~~ page %d created (len: %d)...', this.paginationCounter, lastFilePointer);
+
+		this.outputBuffer.consume(lastFilePointer);
+		this.filePointer -= lastFilePointer;
+
+		for (let i in this.storedChunks)
+			if (this.storedChunks.hasOwnProperty(i))
+				this.storedChunks[i].filePtr -= lastFilePointer;
+
+		this.paginationCounter++;
+	}
 
 	// flag end of frame...
 	this.outputBuffer.append(new Buffer([0]));
